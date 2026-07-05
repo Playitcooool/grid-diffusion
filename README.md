@@ -1,24 +1,24 @@
 # Grid Diffusion Learning
 
-Tiny diffusion demo using `16x16` numeric grids instead of image datasets. It trains a small conditional PyTorch denoiser on five synthetic patterns, then animates reverse diffusion from noise toward one target pattern.
+Tiny diffusion demo using `32x32` numeric grids instead of image datasets. It trains a small class-conditional DDPM on ten synthetic patterns, then animates reverse diffusion from noise toward one target pattern.
 
 ## Quickstart
 
 ```bash
 uv sync
-uv run diffusion-demo --target diagonal --train-steps 1500 --sample-steps 80 --seed 0
+uv run diffusion-demo --target diagonal --train-steps 10000 --seed 0
 ```
 
-Targets: `dot`, `bar`, `diagonal`, `box`, `cross`.
+Targets: `dot`, `bar`, `diagonal`, `box`, `cross`, `ring`, `checker`, `zigzag`, `spiral`, `corners`.
 
 Useful flags:
 
 ```bash
 uv run diffusion-demo --target cross --train-steps 800 --sample-steps 60 --device cpu
-uv run diffusion-demo --target box --stochastic
+uv run diffusion-demo --target box --sampler ddim --sample-steps 80 --eta 0
 ```
 
-`--device auto` uses Apple MPS when available, otherwise CPU.
+`--device auto` uses Apple MPS when available, otherwise CPU. DDPM sampling is the default and uses `--diffusion-steps` frames unless `--sample-steps` is set. DDIM is available as a faster optional sampler.
 
 ## What It Teaches
 
@@ -28,13 +28,45 @@ The clean grid is `x_0`. Forward diffusion adds Gaussian noise:
 x_t = sqrt(alpha_bar_t) * x_0 + sqrt(1 - alpha_bar_t) * epsilon
 ```
 
-The model learns to predict `epsilon` from the noisy grid `x_t`, timestep `t`, and target pattern id. During reverse diffusion, the predicted noise gives an estimate of the clean grid:
+The model learns to predict `epsilon` from the noisy grid `x_t`, timestep `t`, and target pattern id, with classifier-free label dropout during training. During reverse diffusion, the predicted noise gives an estimate of the clean grid:
 
 ```text
 pred_x0 = (x_t - sqrt(1 - alpha_bar_t) * pred_epsilon) / sqrt(alpha_bar_t)
 ```
 
-By default sampling is deterministic DDIM-style, which makes the path easier to see. `--stochastic` adds noise during reverse sampling.
+The displayed target grid is a conditioning-label reference only. The model never receives the clean target image, and the sampler does not blend toward it.
+
+## Techniques Used
+
+**Synthetic grid dataset.** The dataset is ten hand-written `32x32` binary patterns. Each training example is a clean image `x_0` plus a class label such as `ring` or `cross`. This keeps the demo small enough to run locally while still using the same tensor shape convention as image diffusion: `(batch, channels, height, width)`.
+
+**Noise schedule.** A schedule defines how much Gaussian noise is added at each timestep. The default is the cosine schedule with `s = 0.008`, which keeps early timesteps less destructive than a simple linear schedule. Linear scheduling is still available with `--schedule linear` for comparison.
+
+**Forward diffusion.** Training samples a random timestep `t`, draws Gaussian noise `epsilon`, and builds `x_t` from `x_0`. The model only sees `x_t`, `t`, and a class label. It does not see the clean target grid.
+
+**Epsilon prediction.** The U-Net predicts the noise that was added, not the clean image directly. The loss is plain mean squared error:
+
+```text
+loss = MSE(pred_epsilon, epsilon)
+```
+
+After prediction, the clean estimate can be recovered with the `pred_x0` formula above.
+
+**Tiny U-Net.** `TinyUNet` is a small convolutional U-Net with residual blocks, GroupNorm, SiLU activations, downsampling, upsampling, and skip connections. Sinusoidal timestep embeddings tell the model how noisy the input is. Label embeddings tell it which pattern class to generate.
+
+**Classifier-free guidance.** During training, labels are randomly replaced by a null label using `--cond-drop`. At sampling time the model predicts both an unconditional noise estimate and a conditional one:
+
+```text
+guided_epsilon = eps_uncond + guidance_scale * (eps_cond - eps_uncond)
+```
+
+Higher `--guidance-scale` follows the selected class more strongly, but too much guidance can make samples worse.
+
+**EMA sampling.** Training keeps an exponential moving average copy of the model weights. Sampling uses the EMA model because it is usually smoother than the latest training step.
+
+**DDPM sampler.** The default `--sampler ddpm` uses ancestral reverse diffusion. It walks through the full reverse chain and adds fresh noise at every step except the final one. This is the faithful stochastic sampler.
+
+**DDIM sampler.** `--sampler ddim` is the fast sampler. It can skip timesteps and uses `--eta` to control extra noise. `--eta 0` is deterministic.
 
 ## Animation Panels
 
@@ -42,7 +74,7 @@ By default sampling is deterministic DDIM-style, which makes the path easier to 
 - Current grid: the current reverse-diffusion state.
 - Predicted clean grid: the model's current `x_0` estimate.
 - Training loss: loss over training steps.
-- PCA path: a 2D projection of grid space, with the denoising trajectory moving through it.
+- PCA path: a 2D projection of grid space, with noisy reference clusters and the denoising trajectory moving through them.
 - Distance: Euclidean distance from the current grid to the target over inference steps.
 
 ## Tests
