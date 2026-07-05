@@ -20,6 +20,17 @@ uv run diffusion-demo --target box --sampler ddim --sample-steps 80 --eta 0
 
 `--device auto` uses Apple MPS when available, otherwise CPU. DDPM sampling is the default and uses `--diffusion-steps` frames unless `--sample-steps` is set. DDIM is available as a faster optional sampler.
 
+## Separate Training And Inference
+
+The default `--mode run` trains, saves a checkpoint, then samples. To train once and reuse the EMA model:
+
+```bash
+uv run diffusion-demo --mode train --checkpoint demo.pt --train-steps 10000
+uv run diffusion-demo --mode infer --checkpoint demo.pt --target ring --sampler ddim --sample-steps 80
+```
+
+Inference loads the checkpoint's EMA weights, schedule type, training losses, and diffusion step count.
+
 ## What It Teaches
 
 The clean grid is `x_0`. Forward diffusion adds Gaussian noise:
@@ -74,7 +85,7 @@ Higher `--guidance-scale` follows the selected class more strongly, but too much
 - Current grid: the current reverse-diffusion state.
 - Predicted clean grid: the model's current `x_0` estimate.
 - Training loss: loss over training steps.
-- PCA path: a smooth 3D projection of probability space, with noisy reference clusters and the denoising trajectory moving through them.
+- PCA path: a smooth probability-density surface in PCA space, with the denoising trajectory moving across it.
 - Distance: Euclidean distance from the current grid to the target over inference steps.
 
 ## Tests

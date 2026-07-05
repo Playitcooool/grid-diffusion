@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import sys
 
 import matplotlib.pyplot as plt
 from matplotlib.animation import FuncAnimation
@@ -9,6 +10,8 @@ import torch
 
 from .diffusion import Schedule, TinyUNet, sample, seed_everything, train
 from .patterns import PATTERN_NAMES, all_patterns, pattern_array, target_index
+
+DEFAULT_CHECKPOINT = "diffusion-demo.pt"
 
 
 def choose_device(value: str) -> torch.device:
@@ -41,6 +44,21 @@ def smooth_path(points: np.ndarray, factor: int = 8) -> tuple[np.ndarray, np.nda
     return dense_frames, dense
 
 
+def density_surface(points: np.ndarray, size: int = 35) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    xy = points[:, :2]
+    xy_min = xy.min(axis=0)
+    xy_max = xy.max(axis=0)
+    pad = np.maximum((xy_max - xy_min) * 0.08, 0.5)
+    x = np.linspace(xy_min[0] - pad[0], xy_max[0] + pad[0], size)
+    y = np.linspace(xy_min[1] - pad[1], xy_max[1] + pad[1], size)
+    xx, yy = np.meshgrid(x, y)
+    sigma = max(float(np.linalg.norm(xy_max - xy_min)) / 8.0, 1.0)
+    d2 = (xx[..., None] - xy[:, 0]) ** 2 + (yy[..., None] - xy[:, 1]) ** 2
+    zz = np.exp(-d2 / (2.0 * sigma * sigma)).mean(axis=2)
+    zz = zz / max(float(zz.max()), 1e-12)
+    return xx, yy, zz
+
+
 def animate(target: str, losses: list[float], xs: torch.Tensor, pred_x0s: torch.Tensor) -> None:
     target_grid = pattern_array(target)
     traj = xs[:, 0, 0].numpy()
@@ -48,12 +66,14 @@ def animate(target: str, losses: list[float], xs: torch.Tensor, pred_x0s: torch.
     distances = np.linalg.norm((traj - target_grid).reshape(len(traj), -1), axis=1)
     patterns = np.stack([probability_grid(pattern_array(name)).reshape(-1) for name in PATTERN_NAMES])
     refs, ref_labels = pca_reference_clouds(patterns)
-    traj_probs = probability_grid(traj).reshape(len(traj), -1)
+    traj_probs = probability_grid(preds).reshape(len(preds), -1)
     coords = pca(np.vstack([refs, patterns, traj_probs]))
     ref_xyz = coords[: len(refs)]
     pattern_xyz = coords[len(refs) : len(refs) + len(PATTERN_NAMES)]
-    traj_xyz = coords[len(refs) + len(PATTERN_NAMES) :]
-    dense_frames, dense_traj_xyz = smooth_path(traj_xyz)
+    traj_xy = coords[len(refs) + len(PATTERN_NAMES) :, :2]
+    surface_x, surface_y, surface_z = density_surface(np.vstack([ref_xyz[:, :2], pattern_xyz[:, :2], traj_xy]))
+    dense_frames, dense_traj_xy = smooth_path(traj_xy)
+    dense_path_z = np.interp(dense_frames, np.arange(len(traj_xy)), np.full(len(traj_xy), 1.08))
 
     fig, ax = plt.subplots(2, 3, figsize=(11, 7))
     ax[1, 1].remove()
@@ -82,21 +102,22 @@ def animate(target: str, losses: list[float], xs: torch.Tensor, pred_x0s: torch.
     ax[1, 0].set_xlabel("step")
 
     colors = plt.get_cmap("tab10")(np.arange(len(PATTERN_NAMES)) % 10)
+    ax_path.plot_surface(surface_x, surface_y, surface_z, cmap="viridis", alpha=0.42, linewidth=0, antialiased=True)
     for i, color in enumerate(colors):
         cluster = ref_xyz[ref_labels == i]
-        ax_path.scatter(cluster[:, 0], cluster[:, 1], cluster[:, 2], color=color, s=10, alpha=0.18, edgecolors="none")
-    ax_path.scatter(pattern_xyz[:, 0], pattern_xyz[:, 1], pattern_xyz[:, 2], c=colors, s=28, marker="x")
+        ax_path.scatter(cluster[:, 0], cluster[:, 1], np.full(len(cluster), 1.02), color=color, s=8, alpha=0.18, edgecolors="none")
+    ax_path.scatter(pattern_xyz[:, 0], pattern_xyz[:, 1], np.full(len(pattern_xyz), 1.04), c=colors, s=28, marker="x")
     for name, xyz in zip(PATTERN_NAMES, pattern_xyz):
-        ax_path.text(xyz[0], xyz[1], xyz[2], name, fontsize=8)
+        ax_path.text(xyz[0], xyz[1], 1.08, name, fontsize=8)
     path_line, = ax_path.plot([], [], [], c="tab:blue", lw=1.5)
     path_dot, = ax_path.plot([], [], [], "o", c="tab:red")
-    xy_min = coords.min(axis=0)
-    xy_max = coords.max(axis=0)
+    xy_min = coords[:, :2].min(axis=0)
+    xy_max = coords[:, :2].max(axis=0)
     xy_pad = np.maximum((xy_max - xy_min) * 0.08, 0.5)
     ax_path.set_xlim(xy_min[0] - xy_pad[0], xy_max[0] + xy_pad[0])
     ax_path.set_ylim(xy_min[1] - xy_pad[1], xy_max[1] + xy_pad[1])
-    ax_path.set_zlim(xy_min[2] - xy_pad[2], xy_max[2] + xy_pad[2])
-    ax_path.set_title("3D PCA probability-space path")
+    ax_path.set_zlim(0, 1.12)
+    ax_path.set_title("PCA probability-density path")
 
     dist_line, = ax[1, 2].plot([], [], c="tab:green", lw=1.5)
     ax[1, 2].set_xlim(0, len(distances) - 1)
@@ -108,8 +129,8 @@ def animate(target: str, losses: list[float], xs: torch.Tensor, pred_x0s: torch.
         images[1].set_data(traj[i])
         images[2].set_data(preds[i])
         upto = np.searchsorted(dense_frames, i, side="right")
-        path_line.set_data_3d(dense_traj_xyz[:upto, 0], dense_traj_xyz[:upto, 1], dense_traj_xyz[:upto, 2])
-        path_dot.set_data_3d([traj_xyz[i, 0]], [traj_xyz[i, 1]], [traj_xyz[i, 2]])
+        path_line.set_data_3d(dense_traj_xy[:upto, 0], dense_traj_xy[:upto, 1], dense_path_z[:upto])
+        path_dot.set_data_3d([traj_xy[i, 0]], [traj_xy[i, 1]], [1.08])
         dist_line.set_data(np.arange(i + 1), distances[: i + 1])
         return [images[1], images[2], path_line, path_dot, dist_line]
 
@@ -124,8 +145,30 @@ def animate(target: str, losses: list[float], xs: torch.Tensor, pred_x0s: torch.
     plt.show()
 
 
+def save_checkpoint(path: str, ema_model: TinyUNet, losses: list[float], schedule: str, diffusion_steps: int) -> None:
+    torch.save(
+        {
+            "ema_model": ema_model.state_dict(),
+            "losses": losses,
+            "schedule": schedule,
+            "diffusion_steps": diffusion_steps,
+        },
+        path,
+    )
+
+
+def load_checkpoint(path: str, device: torch.device) -> tuple[TinyUNet, list[float], str, int]:
+    checkpoint = torch.load(path, map_location=device)
+    model = TinyUNet().to(device)
+    model.load_state_dict(checkpoint["ema_model"])
+    model.eval()
+    return model, checkpoint.get("losses", []), checkpoint.get("schedule", "cosine"), checkpoint.get("diffusion_steps", 1_000)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Learn diffusion on tiny numeric grids.")
+    parser.add_argument("--mode", choices=("run", "train", "infer"), default="run")
+    parser.add_argument("--checkpoint", default=DEFAULT_CHECKPOINT)
     parser.add_argument("--target", choices=PATTERN_NAMES, default="diagonal")
     parser.add_argument("--train-steps", type=int, default=10_000)
     parser.add_argument("--diffusion-steps", type=int, default=1_000)
@@ -144,22 +187,34 @@ def main() -> None:
 
     device = choose_device(args.device)
     seed_everything(args.seed)
-    data = all_patterns(device)
-    schedule = getattr(Schedule, args.schedule)(steps=args.diffusion_steps, device=device)
+
+    if args.mode in ("run", "train"):
+        data = all_patterns(device)
+        schedule = getattr(Schedule, args.schedule)(steps=args.diffusion_steps, device=device)
+        model = TinyUNet().to(device)
+        losses, ema_model = train(
+            model,
+            data,
+            schedule,
+            steps=args.train_steps,
+            seed=args.seed,
+            lr=args.lr,
+            batch_size=args.batch_size,
+            ema_decay=args.ema_decay,
+            cond_drop=args.cond_drop,
+            progress=True,
+        )
+        save_checkpoint(args.checkpoint, ema_model, losses, args.schedule, args.diffusion_steps)
+        print(f"saved checkpoint to {args.checkpoint}", file=sys.stderr)
+        if args.mode == "train":
+            return
+    else:
+        ema_model, losses, checkpoint_schedule, checkpoint_steps = load_checkpoint(args.checkpoint, device)
+        args.schedule = checkpoint_schedule
+        args.diffusion_steps = checkpoint_steps
+        schedule = getattr(Schedule, args.schedule)(steps=args.diffusion_steps, device=device)
+
     sample_steps = args.sample_steps or (args.diffusion_steps if args.sampler == "ddpm" else 80)
-    model = TinyUNet().to(device)
-    losses, ema_model = train(
-        model,
-        data,
-        schedule,
-        steps=args.train_steps,
-        seed=args.seed,
-        lr=args.lr,
-        batch_size=args.batch_size,
-        ema_decay=args.ema_decay,
-        cond_drop=args.cond_drop,
-        progress=True,
-    )
     xs, pred_x0s = sample(
         ema_model,
         schedule,
