@@ -141,6 +141,7 @@ def main() -> None:
         batch_size=args.batch_size,
         ema_decay=args.ema_decay,
         cond_drop=args.cond_drop,
+        progress=True,
     )
     xs, pred_x0s = sample(
         ema_model,

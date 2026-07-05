@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import math
 import copy
+import sys
 from dataclasses import dataclass
 
 import torch
@@ -149,6 +150,7 @@ def train(
     batch_size: int = 64,
     ema_decay: float = 0.999,
     cond_drop: float = 0.1,
+    progress: bool = False,
 ) -> tuple[list[float], TinyUNet]:
     seed_everything(seed)
     opt = torch.optim.AdamW(model.parameters(), lr=lr)
@@ -157,7 +159,10 @@ def train(
         p.requires_grad_(False)
     losses: list[float] = []
 
-    for _ in range(steps):
+    width = 28
+    every = max(1, steps // 100)
+
+    for step in range(steps):
         labels = torch.randint(0, data.shape[0], (batch_size,), device=data.device)
         x0 = data[labels]
         train_labels = labels.masked_fill(torch.rand(labels.shape, device=data.device) < cond_drop, TinyUNet.null_label)
@@ -171,6 +176,13 @@ def train(
             for ema_p, p in zip(ema_model.parameters(), model.parameters()):
                 ema_p.mul_(ema_decay).add_(p, alpha=1.0 - ema_decay)
         losses.append(float(loss.detach().cpu()))
+        if progress and (step == 0 or step == steps - 1 or (step + 1) % every == 0):
+            done = int(width * (step + 1) / steps)
+            bar = "#" * done + "-" * (width - done)
+            print(f"\rtraining [{bar}] {step + 1}/{steps} loss={losses[-1]:.4f}", end="", file=sys.stderr, flush=True)
+
+    if progress:
+        print(file=sys.stderr)
 
     return losses, ema_model
 
