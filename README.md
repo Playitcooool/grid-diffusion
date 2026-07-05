@@ -74,7 +74,7 @@ Higher `--guidance-scale` follows the selected class more strongly, but too much
 - Current grid: the current reverse-diffusion state.
 - Predicted clean grid: the model's current `x_0` estimate.
 - Training loss: loss over training steps.
-- PCA path: a 2D projection of grid space, with noisy reference clusters and the denoising trajectory moving through them.
+- PCA path: a 3D projection of grid space, with noisy reference clusters and the denoising trajectory moving through them.
 - Distance: Euclidean distance from the current grid to the target over inference steps.
 
 ## Tests

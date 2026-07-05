@@ -17,10 +17,10 @@ def choose_device(value: str) -> torch.device:
     return torch.device("mps" if torch.backends.mps.is_available() else "cpu")
 
 
-def pca2(points: np.ndarray) -> np.ndarray:
+def pca(points: np.ndarray, dims: int = 3) -> np.ndarray:
     centered = points - points.mean(axis=0, keepdims=True)
     _, _, vt = np.linalg.svd(centered, full_matrices=False)
-    return centered @ vt[:2].T
+    return centered @ vt[:dims].T
 
 
 def pca_reference_clouds(patterns: np.ndarray, copies: int = 24) -> tuple[np.ndarray, np.ndarray]:
@@ -37,12 +37,14 @@ def animate(target: str, losses: list[float], xs: torch.Tensor, pred_x0s: torch.
     distances = np.linalg.norm((traj - target_grid).reshape(len(traj), -1), axis=1)
     patterns = np.stack([pattern_array(name).reshape(-1) for name in PATTERN_NAMES])
     refs, ref_labels = pca_reference_clouds(patterns)
-    coords = pca2(np.vstack([refs, patterns, traj.reshape(len(traj), -1)]))
-    ref_xy = coords[: len(refs)]
-    pattern_xy = coords[len(refs) : len(refs) + len(PATTERN_NAMES)]
-    traj_xy = coords[len(refs) + len(PATTERN_NAMES) :]
+    coords = pca(np.vstack([refs, patterns, traj.reshape(len(traj), -1)]))
+    ref_xyz = coords[: len(refs)]
+    pattern_xyz = coords[len(refs) : len(refs) + len(PATTERN_NAMES)]
+    traj_xyz = coords[len(refs) + len(PATTERN_NAMES) :]
 
     fig, ax = plt.subplots(2, 3, figsize=(11, 7))
+    ax[1, 1].remove()
+    ax_path = fig.add_subplot(2, 3, 5, projection="3d")
     fig.canvas.manager.set_window_title("Grid Diffusion Learning")
 
     images = [
@@ -68,19 +70,20 @@ def animate(target: str, losses: list[float], xs: torch.Tensor, pred_x0s: torch.
 
     colors = plt.get_cmap("tab10")(np.arange(len(PATTERN_NAMES)) % 10)
     for i, color in enumerate(colors):
-        cluster = ref_xy[ref_labels == i]
-        ax[1, 1].scatter(cluster[:, 0], cluster[:, 1], color=color, s=14, alpha=0.22, edgecolors="none")
-    ax[1, 1].scatter(pattern_xy[:, 0], pattern_xy[:, 1], c=colors, s=28, marker="x")
-    for name, xy in zip(PATTERN_NAMES, pattern_xy):
-        ax[1, 1].text(xy[0], xy[1], name, fontsize=8)
-    path_line, = ax[1, 1].plot([], [], c="tab:blue", lw=1.5)
-    path_dot, = ax[1, 1].plot([], [], "o", c="tab:red")
+        cluster = ref_xyz[ref_labels == i]
+        ax_path.scatter(cluster[:, 0], cluster[:, 1], cluster[:, 2], color=color, s=10, alpha=0.18, edgecolors="none")
+    ax_path.scatter(pattern_xyz[:, 0], pattern_xyz[:, 1], pattern_xyz[:, 2], c=colors, s=28, marker="x")
+    for name, xyz in zip(PATTERN_NAMES, pattern_xyz):
+        ax_path.text(xyz[0], xyz[1], xyz[2], name, fontsize=8)
+    path_line, = ax_path.plot([], [], [], c="tab:blue", lw=1.5)
+    path_dot, = ax_path.plot([], [], [], "o", c="tab:red")
     xy_min = coords.min(axis=0)
     xy_max = coords.max(axis=0)
     xy_pad = np.maximum((xy_max - xy_min) * 0.08, 0.5)
-    ax[1, 1].set_xlim(xy_min[0] - xy_pad[0], xy_max[0] + xy_pad[0])
-    ax[1, 1].set_ylim(xy_min[1] - xy_pad[1], xy_max[1] + xy_pad[1])
-    ax[1, 1].set_title("2D PCA image-space path")
+    ax_path.set_xlim(xy_min[0] - xy_pad[0], xy_max[0] + xy_pad[0])
+    ax_path.set_ylim(xy_min[1] - xy_pad[1], xy_max[1] + xy_pad[1])
+    ax_path.set_zlim(xy_min[2] - xy_pad[2], xy_max[2] + xy_pad[2])
+    ax_path.set_title("3D PCA image-space path")
 
     dist_line, = ax[1, 2].plot([], [], c="tab:green", lw=1.5)
     ax[1, 2].set_xlim(0, len(distances) - 1)
@@ -91,8 +94,8 @@ def animate(target: str, losses: list[float], xs: torch.Tensor, pred_x0s: torch.
     def update(i: int):
         images[1].set_data(traj[i])
         images[2].set_data(preds[i])
-        path_line.set_data(traj_xy[: i + 1, 0], traj_xy[: i + 1, 1])
-        path_dot.set_data([traj_xy[i, 0]], [traj_xy[i, 1]])
+        path_line.set_data_3d(traj_xyz[: i + 1, 0], traj_xyz[: i + 1, 1], traj_xyz[: i + 1, 2])
+        path_dot.set_data_3d([traj_xyz[i, 0]], [traj_xyz[i, 1]], [traj_xyz[i, 2]])
         dist_line.set_data(np.arange(i + 1), distances[: i + 1])
         return [images[1], images[2], path_line, path_dot, dist_line]
 
