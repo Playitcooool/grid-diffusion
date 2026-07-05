@@ -26,8 +26,19 @@ def pca(points: np.ndarray, dims: int = 3) -> np.ndarray:
 def pca_reference_clouds(patterns: np.ndarray, copies: int = 24) -> tuple[np.ndarray, np.ndarray]:
     rng = np.random.default_rng(0)
     labels = np.repeat(np.arange(len(patterns)), copies)
-    noise = rng.normal(0, 0.25, (len(labels), patterns.shape[1]))
-    return np.clip(patterns[labels] + noise, -1, 1), labels
+    noise = rng.normal(0, 0.12, (len(labels), patterns.shape[1]))
+    return np.clip(patterns[labels] + noise, 0, 1), labels
+
+
+def probability_grid(grid: np.ndarray) -> np.ndarray:
+    return np.clip((grid + 1.0) * 0.5, 0.0, 1.0)
+
+
+def smooth_path(points: np.ndarray, factor: int = 8) -> tuple[np.ndarray, np.ndarray]:
+    frames = np.arange(len(points))
+    dense_frames = np.linspace(0, len(points) - 1, max(2, (len(points) - 1) * factor + 1))
+    dense = np.column_stack([np.interp(dense_frames, frames, points[:, dim]) for dim in range(points.shape[1])])
+    return dense_frames, dense
 
 
 def animate(target: str, losses: list[float], xs: torch.Tensor, pred_x0s: torch.Tensor) -> None:
@@ -35,12 +46,14 @@ def animate(target: str, losses: list[float], xs: torch.Tensor, pred_x0s: torch.
     traj = xs[:, 0, 0].numpy()
     preds = pred_x0s[:, 0, 0].numpy()
     distances = np.linalg.norm((traj - target_grid).reshape(len(traj), -1), axis=1)
-    patterns = np.stack([pattern_array(name).reshape(-1) for name in PATTERN_NAMES])
+    patterns = np.stack([probability_grid(pattern_array(name)).reshape(-1) for name in PATTERN_NAMES])
     refs, ref_labels = pca_reference_clouds(patterns)
-    coords = pca(np.vstack([refs, patterns, traj.reshape(len(traj), -1)]))
+    traj_probs = probability_grid(traj).reshape(len(traj), -1)
+    coords = pca(np.vstack([refs, patterns, traj_probs]))
     ref_xyz = coords[: len(refs)]
     pattern_xyz = coords[len(refs) : len(refs) + len(PATTERN_NAMES)]
     traj_xyz = coords[len(refs) + len(PATTERN_NAMES) :]
+    dense_frames, dense_traj_xyz = smooth_path(traj_xyz)
 
     fig, ax = plt.subplots(2, 3, figsize=(11, 7))
     ax[1, 1].remove()
@@ -48,9 +61,9 @@ def animate(target: str, losses: list[float], xs: torch.Tensor, pred_x0s: torch.
     fig.canvas.manager.set_window_title("Grid Diffusion Learning")
 
     images = [
-        ax[0, 0].imshow(target_grid, cmap="coolwarm", vmin=-1, vmax=1),
-        ax[0, 1].imshow(traj[0], cmap="coolwarm", vmin=-1, vmax=1),
-        ax[0, 2].imshow(preds[0], cmap="coolwarm", vmin=-1, vmax=1),
+        ax[0, 0].imshow(target_grid, cmap="coolwarm", vmin=-1, vmax=1, interpolation="nearest"),
+        ax[0, 1].imshow(traj[0], cmap="coolwarm", vmin=-1, vmax=1, interpolation="nearest"),
+        ax[0, 2].imshow(preds[0], cmap="coolwarm", vmin=-1, vmax=1, interpolation="nearest"),
     ]
     ax[0, 0].set_title("Target grid")
     ax[0, 1].set_title("Current denoising grid")
@@ -83,7 +96,7 @@ def animate(target: str, losses: list[float], xs: torch.Tensor, pred_x0s: torch.
     ax_path.set_xlim(xy_min[0] - xy_pad[0], xy_max[0] + xy_pad[0])
     ax_path.set_ylim(xy_min[1] - xy_pad[1], xy_max[1] + xy_pad[1])
     ax_path.set_zlim(xy_min[2] - xy_pad[2], xy_max[2] + xy_pad[2])
-    ax_path.set_title("3D PCA image-space path")
+    ax_path.set_title("3D PCA probability-space path")
 
     dist_line, = ax[1, 2].plot([], [], c="tab:green", lw=1.5)
     ax[1, 2].set_xlim(0, len(distances) - 1)
@@ -94,7 +107,8 @@ def animate(target: str, losses: list[float], xs: torch.Tensor, pred_x0s: torch.
     def update(i: int):
         images[1].set_data(traj[i])
         images[2].set_data(preds[i])
-        path_line.set_data_3d(traj_xyz[: i + 1, 0], traj_xyz[: i + 1, 1], traj_xyz[: i + 1, 2])
+        upto = np.searchsorted(dense_frames, i, side="right")
+        path_line.set_data_3d(dense_traj_xyz[:upto, 0], dense_traj_xyz[:upto, 1], dense_traj_xyz[:upto, 2])
         path_dot.set_data_3d([traj_xyz[i, 0]], [traj_xyz[i, 1]], [traj_xyz[i, 2]])
         dist_line.set_data(np.arange(i + 1), distances[: i + 1])
         return [images[1], images[2], path_line, path_dot, dist_line]
