@@ -57,6 +57,11 @@ def animate(target: str, losses: list[float], xs: torch.Tensor, pred_x0s: torch.
         ax[1, 1].text(xy[0], xy[1], name, fontsize=8)
     path_line, = ax[1, 1].plot([], [], c="tab:blue", lw=1.5)
     path_dot, = ax[1, 1].plot([], [], "o", c="tab:red")
+    xy_min = coords.min(axis=0)
+    xy_max = coords.max(axis=0)
+    xy_pad = np.maximum((xy_max - xy_min) * 0.08, 0.5)
+    ax[1, 1].set_xlim(xy_min[0] - xy_pad[0], xy_max[0] + xy_pad[0])
+    ax[1, 1].set_ylim(xy_min[1] - xy_pad[1], xy_max[1] + xy_pad[1])
     ax[1, 1].set_title("2D PCA image-space path")
 
     dist_line, = ax[1, 2].plot([], [], c="tab:green", lw=1.5)
