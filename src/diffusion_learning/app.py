@@ -21,12 +21,14 @@ def choose_device(value: str) -> torch.device:
 
 
 def pca(points: np.ndarray, dims: int = 3) -> np.ndarray:
+    # Project 1024-pixel grids into a tiny coordinate system for plotting.
     centered = points - points.mean(axis=0, keepdims=True)
     _, _, vt = np.linalg.svd(centered, full_matrices=False)
     return centered @ vt[:dims].T
 
 
 def pca_reference_clouds(patterns: np.ndarray, copies: int = 24) -> tuple[np.ndarray, np.ndarray]:
+    # Around each ideal pattern, make a small cloud so PCA has local structure.
     rng = np.random.default_rng(0)
     labels = np.repeat(np.arange(len(patterns)), copies)
     noise = rng.normal(0, 0.12, (len(labels), patterns.shape[1]))
@@ -34,6 +36,7 @@ def pca_reference_clouds(patterns: np.ndarray, copies: int = 24) -> tuple[np.nda
 
 
 def probability_grid(grid: np.ndarray) -> np.ndarray:
+    # Model images live in [-1, 1]; probability space is easier to compare.
     return np.clip((grid + 1.0) * 0.5, 0.0, 1.0)
 
 
@@ -45,6 +48,8 @@ def smooth_path(points: np.ndarray, factor: int = 8) -> tuple[np.ndarray, np.nda
 
 
 def density_surface(points: np.ndarray, size: int = 35) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    # Simple Gaussian kernel density over the PCA plane. This is only a teaching
+    # visualization, not part of the diffusion model.
     xy = points[:, :2]
     xy_min = xy.min(axis=0)
     xy_max = xy.max(axis=0)
@@ -66,6 +71,8 @@ def animate(target: str, losses: list[float], xs: torch.Tensor, pred_x0s: torch.
     distances = np.linalg.norm((traj - target_grid).reshape(len(traj), -1), axis=1)
     patterns = np.stack([probability_grid(pattern_array(name)).reshape(-1) for name in PATTERN_NAMES])
     refs, ref_labels = pca_reference_clouds(patterns)
+    # Plot the model's clean estimates in probability space; the noisy x_t path
+    # is less useful for seeing whether the sampler is moving toward a class.
     traj_probs = probability_grid(preds).reshape(len(preds), -1)
     coords = pca(np.vstack([refs, patterns, traj_probs]))
     ref_xyz = coords[: len(refs)]
@@ -135,6 +142,7 @@ def animate(target: str, losses: list[float], xs: torch.Tensor, pred_x0s: torch.
         return [images[1], images[2], path_line, path_dot, dist_line]
 
     if "agg" in plt.get_backend().lower():
+        # Headless test mode: render one frame to catch plotting errors.
         update(len(traj) - 1)
         fig.canvas.draw()
         plt.close(fig)
@@ -146,6 +154,7 @@ def animate(target: str, losses: list[float], xs: torch.Tensor, pred_x0s: torch.
 
 
 def save_checkpoint(path: str, ema_model: TinyUNet, losses: list[float], schedule: str, diffusion_steps: int) -> None:
+    # Save only what inference needs: EMA weights plus plotting/schedule metadata.
     torch.save(
         {
             "ema_model": ema_model.state_dict(),
@@ -158,6 +167,7 @@ def save_checkpoint(path: str, ema_model: TinyUNet, losses: list[float], schedul
 
 
 def load_checkpoint(path: str, device: torch.device) -> tuple[TinyUNet, list[float], str, int]:
+    # Checkpoints are device-neutral; map tensors to the requested runtime device.
     checkpoint = torch.load(path, map_location=device)
     model = TinyUNet().to(device)
     model.load_state_dict(checkpoint["ema_model"])
@@ -189,6 +199,7 @@ def main() -> None:
     seed_everything(args.seed)
 
     if args.mode in ("run", "train"):
+        # Training mode creates a fresh model and stores its EMA copy.
         data = all_patterns(device)
         schedule = getattr(Schedule, args.schedule)(steps=args.diffusion_steps, device=device)
         model = TinyUNet().to(device)
@@ -209,6 +220,7 @@ def main() -> None:
         if args.mode == "train":
             return
     else:
+        # Inference mode skips training entirely and reuses the checkpoint.
         ema_model, losses, checkpoint_schedule, checkpoint_steps = load_checkpoint(args.checkpoint, device)
         args.schedule = checkpoint_schedule
         args.diffusion_steps = checkpoint_steps

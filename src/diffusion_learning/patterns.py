@@ -8,10 +8,12 @@ GRID_SIZE = 32
 
 
 def _empty() -> np.ndarray:
+    # Diffusion data uses -1 as background and +1 as foreground.
     return np.full((GRID_SIZE, GRID_SIZE), -1.0, dtype=np.float32)
 
 
 def pattern_array(name: str) -> np.ndarray:
+    # Hand-built patterns replace an image dataset so the demo stays tiny.
     grid = _empty()
     c = GRID_SIZE // 2
     yy, xx = np.indices((GRID_SIZE, GRID_SIZE))

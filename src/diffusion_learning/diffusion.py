@@ -14,6 +14,8 @@ from .patterns import GRID_SIZE, PATTERN_NAMES
 
 @dataclass(frozen=True)
 class Schedule:
+    # DDPM schedules are all scalar per-timestep values. Precomputing them keeps
+    # the train and sample loops close to the equations from the paper.
     betas: torch.Tensor
     alphas: torch.Tensor
     alpha_bars: torch.Tensor
@@ -31,6 +33,8 @@ class Schedule:
 
     @classmethod
     def cosine(cls, steps: int = 1_000, device: torch.device | str = "cpu") -> "Schedule":
+        # Nichol & Dhariwal cosine schedule: slow noise growth early, aggressive
+        # corruption near the end. The clamp avoids a final beta of exactly 1.
         s = 0.008
         x = torch.linspace(0, steps, steps + 1, device=device)
         alpha_bars = torch.cos(((x / steps) + s) / (1 + s) * math.pi * 0.5).square()
@@ -43,6 +47,8 @@ class Schedule:
         alphas = 1.0 - betas
         alpha_bars = torch.cumprod(alphas, dim=0)
         alpha_bars_prev = F.pad(alpha_bars[:-1], (1, 0), value=1.0)
+        # q(x_{t-1} | x_t, x_0) has a closed-form Gaussian posterior. Sampling
+        # uses these coefficients after the model predicts x_0 from epsilon.
         posterior_variance = betas * (1.0 - alpha_bars_prev) / (1.0 - alpha_bars)
         return cls(
             betas=betas,
@@ -68,12 +74,14 @@ def seed_everything(seed: int) -> None:
 
 
 def q_sample(x0: torch.Tensor, t: torch.Tensor, schedule: Schedule, noise: torch.Tensor | None = None) -> torch.Tensor:
+    # Forward diffusion: draw x_t directly from q(x_t | x_0), no loop needed.
     noise = torch.randn_like(x0) if noise is None else noise
     ab = schedule.alpha_bars[t].view(-1, 1, 1, 1)
     return ab.sqrt() * x0 + (1.0 - ab).sqrt() * noise
 
 
 def timestep_embedding(t: torch.Tensor, dim: int) -> torch.Tensor:
+    # Sinusoidal embeddings let one U-Net handle every noise level t.
     half = dim // 2
     freqs = torch.exp(torch.arange(half, device=t.device) * (-math.log(10_000.0) / max(half - 1, 1)))
     angles = t.float()[:, None] * freqs[None]
@@ -100,12 +108,14 @@ class ResBlock(nn.Module):
 
     def forward(self, x: torch.Tensor, emb: torch.Tensor) -> torch.Tensor:
         h = self.conv1(F.silu(self.norm1(x)))
+        # Add timestep/class conditioning as a channel-wise bias.
         h = h + self.emb(F.silu(emb))[:, :, None, None]
         h = self.conv2(F.silu(self.norm2(h)))
         return h + self.skip(x)
 
 
 class TinyUNet(nn.Module):
+    # The extra label is the unconditional class used for classifier-free guidance.
     null_label = len(PATTERN_NAMES)
 
     def __init__(self, base: int = 32, emb_dim: int = 64) -> None:
@@ -127,6 +137,7 @@ class TinyUNet(nn.Module):
         self.out_conv = nn.Conv2d(base, 1, 3, padding=1)
 
     def forward(self, x: torch.Tensor, t: torch.Tensor, labels: torch.Tensor) -> torch.Tensor:
+        # Time and class embeddings share the same vector space and are summed.
         emb = self.time_mlp(timestep_embedding(t, self.emb_dim)) + self.label_emb(labels)
         h0 = self.in_conv(x)
         h1 = self.down1(h0, emb)
@@ -154,6 +165,7 @@ def train(
 ) -> tuple[list[float], TinyUNet]:
     seed_everything(seed)
     opt = torch.optim.AdamW(model.parameters(), lr=lr)
+    # EMA weights lag behind training updates and usually sample more smoothly.
     ema_model = copy.deepcopy(model).eval()
     for p in ema_model.parameters():
         p.requires_grad_(False)
@@ -165,9 +177,12 @@ def train(
     for step in range(steps):
         labels = torch.randint(0, data.shape[0], (batch_size,), device=data.device)
         x0 = data[labels]
+        # Classifier-free guidance training: sometimes hide the label so the
+        # model learns both conditional and unconditional denoising.
         train_labels = labels.masked_fill(torch.rand(labels.shape, device=data.device) < cond_drop, TinyUNet.null_label)
         t = torch.randint(0, schedule.steps, (x0.shape[0],), device=data.device)
         noise = torch.randn_like(x0)
+        # Epsilon prediction objective: predict the noise that produced x_t.
         loss = F.mse_loss(model(q_sample(x0, t, schedule, noise), t, train_labels), noise)
         opt.zero_grad()
         loss.backward()
@@ -190,6 +205,7 @@ def train(
 def _guided_eps(model: TinyUNet, x: torch.Tensor, t: torch.Tensor, labels: torch.Tensor, guidance_scale: float) -> torch.Tensor:
     if guidance_scale == 1.0:
         return model(x, t, labels)
+    # CFG pushes the unconditional prediction toward the conditional one.
     nulls = torch.full_like(labels, TinyUNet.null_label)
     eps_uncond = model(x, t, nulls)
     eps_cond = model(x, t, labels)
@@ -217,11 +233,14 @@ def sample(
     pred_x0s = []
 
     if sampler == "ddpm":
+        # DDPM is faithful ancestral sampling: walk every timestep, but record
+        # only sample_steps frames for the animation.
         record_times = set(torch.linspace(schedule.steps - 1, 0, sample_steps, device=device).long().tolist())
         for t_scalar in torch.arange(schedule.steps - 1, -1, -1, device=device):
             t = t_scalar.repeat(num_samples)
             eps = _guided_eps(model, x, t, labels, guidance_scale)
             ab = schedule.alpha_bars[t].view(-1, 1, 1, 1)
+            # Convert predicted epsilon into a clipped clean-image estimate.
             pred_x0 = ((x - (1.0 - ab).sqrt() * eps) / ab.sqrt()).clamp(-1, 1)
             if int(t_scalar) in record_times:
                 xs.append(x.detach().cpu())
@@ -252,6 +271,7 @@ def sample(
             x = pred_x0
             continue
 
+        # DDIM can skip timesteps. eta=0 is deterministic; eta>0 injects noise.
         prev_t = times[i + 1].repeat(num_samples)
         ab_prev = schedule.alpha_bars[prev_t].view(-1, 1, 1, 1)
         sigma = eta * ((1.0 - ab_prev) / (1.0 - ab)).sqrt() * (1.0 - ab / ab_prev).clamp_min(0).sqrt()
