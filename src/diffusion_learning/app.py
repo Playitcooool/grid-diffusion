@@ -226,23 +226,27 @@ def load_checkpoint(path: str, device: torch.device) -> tuple[TinyUNet, list[flo
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Learn diffusion on tiny numeric grids.")
-    parser.add_argument("--mode", choices=("run", "train", "infer"), default="run")
-    parser.add_argument("--checkpoint", default=DEFAULT_CHECKPOINT)
-    parser.add_argument("--target", choices=PATTERN_NAMES, default="diagonal")
-    parser.add_argument("--train-steps", type=int, default=10_000)
-    parser.add_argument("--diffusion-steps", type=int, default=1_000)
-    parser.add_argument("--sample-steps", type=int)
-    parser.add_argument("--schedule", choices=("cosine", "linear"), default="cosine")
-    parser.add_argument("--sampler", choices=("ddpm", "ddim"), default="ddpm")
-    parser.add_argument("--lr", type=float, default=2e-4)
-    parser.add_argument("--batch-size", type=int, default=64)
-    parser.add_argument("--ema-decay", type=float, default=0.999)
-    parser.add_argument("--cond-drop", type=float, default=0.1)
-    parser.add_argument("--guidance-scale", type=float, default=2.0)
-    parser.add_argument("--eta", type=float, default=0.0)
-    parser.add_argument("--seed", type=int, default=0)
-    parser.add_argument("--device", default="auto")
+    parser = argparse.ArgumentParser(
+        description="Train a tiny diffusion model, then explore its denoising path.",
+        epilog="Tip: train once with --mode train, then vary inference flags with --mode infer.",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+    parser.add_argument("--mode", choices=("run", "train", "infer"), default="run", help="run both phases, or only one")
+    parser.add_argument("--checkpoint", default=DEFAULT_CHECKPOINT, help="model file to save or load")
+    parser.add_argument("--target", choices=PATTERN_NAMES, default="diagonal", help="class to generate")
+    parser.add_argument("--train-steps", type=int, default=10_000, help="optimizer updates")
+    parser.add_argument("--diffusion-steps", type=int, default=1_000, help="noise levels in the learned process")
+    parser.add_argument("--sample-steps", type=int, help="recorded DDPM frames or DDIM denoising steps")
+    parser.add_argument("--schedule", choices=("cosine", "linear"), default="cosine", help="how noise grows during training")
+    parser.add_argument("--sampler", choices=("ddpm", "ddim"), default="ddpm", help="faithful DDPM or faster DDIM inference")
+    parser.add_argument("--lr", type=float, default=2e-4, help="AdamW learning rate")
+    parser.add_argument("--batch-size", type=int, default=64, help="training examples per update")
+    parser.add_argument("--ema-decay", type=float, default=0.999, help="smoothing for sampling weights")
+    parser.add_argument("--cond-drop", type=float, default=0.1, help="fraction of labels hidden during CFG training")
+    parser.add_argument("--guidance-scale", type=float, default=2.0, help="strength of class conditioning at inference")
+    parser.add_argument("--eta", type=float, default=0.0, help="DDIM randomness; zero is deterministic")
+    parser.add_argument("--seed", type=int, default=0, help="reproducible training and sampling seed")
+    parser.add_argument("--device", default="auto", help="auto, cpu, mps, or another PyTorch device")
     args = parser.parse_args()
 
     device = choose_device(args.device)
