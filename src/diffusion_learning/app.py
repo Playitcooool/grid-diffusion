@@ -170,7 +170,12 @@ def animate(target: str, losses: list[float], xs: torch.Tensor, pred_x0s: torch.
     following = Button(fig.add_axes((0.73, 0.035, 0.07, 0.045)), "Next")
     restart = Button(fig.add_axes((0.81, 0.035, 0.09, 0.045)), "Restart")
 
+    def set_playing(playing: bool) -> None:
+        (animation.resume if playing else animation.pause)()
+        play.label.set_text("Pause" if playing else "Play")
+
     def show_frame(value: float) -> None:
+        set_playing(False)
         update(int(value))
         fig.canvas.draw_idle()
 
@@ -178,12 +183,13 @@ def animate(target: str, losses: list[float], xs: torch.Tensor, pred_x0s: torch.
         frame_slider.set_val(np.clip(int(frame_slider.val) + delta, 0, len(traj) - 1))
 
     def toggle(_event: object) -> None:
-        if play.label.get_text() == "Pause":
-            animation.pause()
-            play.label.set_text("Play")
-        else:
-            animation.resume()
-            play.label.set_text("Pause")
+        set_playing(play.label.get_text() == "Play")
+        fig.canvas.draw_idle()
+
+    def start_over(_event: object) -> None:
+        animation.frame_seq = animation.new_frame_seq()
+        frame_slider.set_val(0)
+        set_playing(True)
         fig.canvas.draw_idle()
 
     def animate_frame(i: int):
@@ -195,7 +201,7 @@ def animate(target: str, losses: list[float], xs: torch.Tensor, pred_x0s: torch.
     frame_slider.on_changed(show_frame)
     previous.on_clicked(lambda _event: move(-1))
     following.on_clicked(lambda _event: move(1))
-    restart.on_clicked(lambda _event: frame_slider.set_val(0))
+    restart.on_clicked(start_over)
     play.on_clicked(toggle)
     animation = FuncAnimation(fig, animate_frame, frames=len(traj), interval=60, blit=False, repeat=False)
     # Keep interactive objects alive for the lifetime of the Matplotlib window.
