@@ -4,7 +4,9 @@ Learn diffusion by training a small class-conditional model on ten synthetic `32
 
 ## Interactive Lesson
 
-![Current six-panel diffusion lesson with denoising controls](assets/interactive-preview.png)
+![Six-panel diffusion lesson generating a box close to its target](assets/interactive-preview.png)
+
+_A real checkpoint sample: `box`, seed `3`, DDIM with 80 steps, guidance `1.0`. The preview is paused late in denoising so the remaining noise and the cleaner `x_0` prediction can be compared._
 
 The top row compares the target, current noisy state `x_t`, and predicted clean state `x_0`. The bottom row connects training loss, the sample's path through PCA space, and distance to the target. Use the controls to inspect any recorded denoising step.
 
