@@ -95,7 +95,7 @@ def animate(target: str, losses: list[float], xs: torch.Tensor, pred_x0s: torch.
     dense_path_z = np.interp(dense_frames, np.arange(len(traj_xy)), np.full(len(traj_xy), 1.08))
 
     fig, ax = plt.subplots(2, 3, figsize=(11, 7))
-    fig.subplots_adjust(bottom=0.16)
+    fig.subplots_adjust(bottom=0.24, hspace=0.32)
     ax[1, 1].remove()
     ax_path = fig.add_subplot(2, 3, 5, projection="3d")
     fig.canvas.manager.set_window_title("Grid Diffusion Learning")
@@ -145,7 +145,7 @@ def animate(target: str, losses: list[float], xs: torch.Tensor, pred_x0s: torch.
     ax[1, 2].set_title("Distance to target")
     ax[1, 2].set_xlabel("inference step")
 
-    lesson = fig.text(0.5, 0.105, step_explanation(0, len(traj)), ha="center", fontsize=9)
+    lesson = fig.text(0.5, 0.135, step_explanation(0, len(traj)), ha="center", fontsize=9)
 
     def update(i: int):
         images[1].set_data(traj[i])
@@ -164,12 +164,12 @@ def animate(target: str, losses: list[float], xs: torch.Tensor, pred_x0s: torch.
         plt.close(fig)
         return
 
-    slider_ax = fig.add_axes((0.22, 0.045, 0.48, 0.025))
+    slider_ax = fig.add_axes((0.29, 0.045, 0.42, 0.025))
     frame_slider = Slider(slider_ax, "Denoising step", 0, len(traj) - 1, valinit=0, valstep=1)
     previous = Button(fig.add_axes((0.04, 0.035, 0.07, 0.045)), "Prev")
     play = Button(fig.add_axes((0.12, 0.035, 0.07, 0.045)), "Pause")
-    following = Button(fig.add_axes((0.73, 0.035, 0.07, 0.045)), "Next")
-    restart = Button(fig.add_axes((0.81, 0.035, 0.09, 0.045)), "Restart")
+    following = Button(fig.add_axes((0.74, 0.035, 0.07, 0.045)), "Next")
+    restart = Button(fig.add_axes((0.82, 0.035, 0.09, 0.045)), "Restart")
 
     def set_playing(playing: bool) -> None:
         (animation.resume if playing else animation.pause)()
@@ -208,8 +208,8 @@ def animate(target: str, losses: list[float], xs: torch.Tensor, pred_x0s: torch.
     # Keep interactive objects alive for the lifetime of the Matplotlib window.
     fig._diffusion_controls = (animation, frame_slider, previous, play, following, restart)
     if output:
-        animate_frame(len(traj) // 2)
-        fig.savefig(output, dpi=150, bbox_inches="tight")
+        animate_frame(3 * (len(traj) - 1) // 4)
+        fig.savefig(output, dpi=150, bbox_inches="tight", facecolor="white")
         plt.close(fig)
         print(f"saved visualization to {output}", file=sys.stderr)
         return
