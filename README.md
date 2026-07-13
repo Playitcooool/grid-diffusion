@@ -1,16 +1,24 @@
 # Grid Diffusion Learning
 
-Tiny diffusion demo using `32x32` numeric grids instead of image datasets. It trains a small class-conditional DDPM on ten synthetic patterns, then animates reverse diffusion from noise toward one target pattern.
+Learn diffusion by training a small class-conditional model on ten synthetic `32x32` grids. The interactive visualization lets you pause, scrub, and inspect how noise becomes a predicted clean pattern—without needing an image dataset.
 
-## Results
+## Interactive Lesson
 
-![Diffusion demo result](assets/results.gif)
+![Current six-panel diffusion lesson with denoising controls](assets/interactive-preview.png)
+
+The top row compares the target, current noisy state `x_t`, and predicted clean state `x_0`. The bottom row connects training loss, the sample's path through PCA space, and distance to the target. Use the controls to inspect any recorded denoising step.
 
 ## Quickstart
 
 ```bash
 uv sync
 uv run diffusion-demo --target diagonal --train-steps 10000 --seed 0
+```
+
+In a headless or CI environment, the same command saves `diffusion-result.png`. To save explicitly instead of opening the interactive window:
+
+```bash
+uv run diffusion-demo --mode infer --checkpoint diffusion-demo.pt --output diffusion-result.png
 ```
 
 Targets: `dot`, `bar`, `diagonal`, `box`, `cross`, `ring`, `checker`, `zigzag`, `spiral`, `corners`.
