@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 
 import matplotlib.pyplot as plt
@@ -75,7 +76,7 @@ def step_explanation(frame: int, total: int) -> str:
     return "Late: small corrections sharpen the sample toward the chosen class."
 
 
-def animate(target: str, losses: list[float], xs: torch.Tensor, pred_x0s: torch.Tensor) -> None:
+def animate(target: str, losses: list[float], xs: torch.Tensor, pred_x0s: torch.Tensor, output: str | None = None) -> None:
     target_grid = pattern_array(target)
     traj = xs[:, 0, 0].numpy()
     preds = pred_x0s[:, 0, 0].numpy()
@@ -156,7 +157,7 @@ def animate(target: str, losses: list[float], xs: torch.Tensor, pred_x0s: torch.
         lesson.set_text(step_explanation(i, len(traj)))
         return [images[1], images[2], path_line, path_dot, dist_line]
 
-    if "agg" in plt.get_backend().lower():
+    if "agg" in plt.get_backend().lower() and output is None:
         # Headless test mode: render one frame to catch plotting errors.
         update(len(traj) - 1)
         fig.canvas.draw()
@@ -206,6 +207,12 @@ def animate(target: str, losses: list[float], xs: torch.Tensor, pred_x0s: torch.
     animation = FuncAnimation(fig, animate_frame, frames=len(traj), interval=60, blit=False, repeat=False)
     # Keep interactive objects alive for the lifetime of the Matplotlib window.
     fig._diffusion_controls = (animation, frame_slider, previous, play, following, restart)
+    if output:
+        animate_frame(len(traj) // 2)
+        fig.savefig(output, dpi=150, bbox_inches="tight")
+        plt.close(fig)
+        print(f"saved visualization to {output}", file=sys.stderr)
+        return
     plt.show()
 
 
@@ -253,6 +260,7 @@ def main() -> None:
     parser.add_argument("--eta", type=float, default=0.0, help="DDIM randomness; zero is deterministic")
     parser.add_argument("--seed", type=int, default=0, help="reproducible training and sampling seed")
     parser.add_argument("--device", default="auto", help="auto, cpu, mps, or another PyTorch device")
+    parser.add_argument("--output", help="save a PNG instead of opening an interactive window")
     args = parser.parse_args()
 
     device = choose_device(args.device)
@@ -297,7 +305,11 @@ def main() -> None:
         guidance_scale=args.guidance_scale,
         eta=args.eta,
     )
-    animate(args.target, losses, xs, pred_x0s)
+    output = args.output
+    if output or os.environ.get("CI") or os.environ.get("CODEX_CI"):
+        plt.switch_backend("Agg")
+        output = output or "diffusion-result.png"
+    animate(args.target, losses, xs, pred_x0s, output)
 
 
 if __name__ == "__main__":
