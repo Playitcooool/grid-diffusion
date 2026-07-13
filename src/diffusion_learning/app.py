@@ -127,8 +127,8 @@ def animate(target: str, losses: list[float], xs: torch.Tensor, pred_x0s: torch.
         cluster = ref_xyz[ref_labels == i]
         ax_path.scatter(cluster[:, 0], cluster[:, 1], np.full(len(cluster), 1.02), color=color, s=8, alpha=0.18, edgecolors="none")
     ax_path.scatter(pattern_xyz[:, 0], pattern_xyz[:, 1], np.full(len(pattern_xyz), 1.04), c=colors, s=28, marker="x")
-    for name, xyz in zip(PATTERN_NAMES, pattern_xyz):
-        ax_path.text(xyz[0], xyz[1], 1.08, name, fontsize=8)
+    target_xyz = pattern_xyz[target_index(target)]
+    ax_path.text(target_xyz[0], target_xyz[1], 1.08, target, fontsize=9, fontweight="bold")
     path_line, = ax_path.plot([], [], [], c="tab:blue", lw=1.5)
     path_dot, = ax_path.plot([], [], [], "o", c="tab:red")
     xy_min = coords[:, :2].min(axis=0)
@@ -204,15 +204,18 @@ def animate(target: str, losses: list[float], xs: torch.Tensor, pred_x0s: torch.
     following.on_clicked(lambda _event: move(1))
     restart.on_clicked(start_over)
     play.on_clicked(toggle)
-    animation = FuncAnimation(fig, animate_frame, frames=len(traj), interval=60, blit=False, repeat=False)
-    # Keep interactive objects alive for the lifetime of the Matplotlib window.
-    fig._diffusion_controls = (animation, frame_slider, previous, play, following, restart)
     if output:
-        animate_frame(3 * (len(traj) - 1) // 4)
+        frame_slider.eventson = False
+        frame_slider.set_val(len(traj) - 1)
+        frame_slider.eventson = True
+        update(len(traj) - 1)
         fig.savefig(output, dpi=150, bbox_inches="tight", facecolor="white")
         plt.close(fig)
         print(f"saved visualization to {output}", file=sys.stderr)
         return
+    animation = FuncAnimation(fig, animate_frame, frames=len(traj), interval=60, blit=False, repeat=False)
+    # Keep interactive objects alive for the lifetime of the Matplotlib window.
+    fig._diffusion_controls = (animation, frame_slider, previous, play, following, restart)
     plt.show()
 
 
