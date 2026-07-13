@@ -4,7 +4,7 @@ Learn diffusion by training a small class-conditional model on ten synthetic `32
 
 ## Interactive Lesson
 
-![Six-panel diffusion lesson generating a box close to its target](assets/interactive-preview.png)
+![Six-panel diffusion lesson generating a box close to its target](assets/interactive-preview-4000.png)
 
 _A real checkpoint trained for 4,000 steps, then sampled as `box` with seed `3`, DDIM 80 steps, and guidance `1.0`. The preview shows the completed 80th step._
 
