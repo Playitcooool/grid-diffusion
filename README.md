@@ -2,6 +2,10 @@
 
 Tiny diffusion demo using `32x32` numeric grids instead of image datasets. It trains a small class-conditional DDPM on ten synthetic patterns, then animates reverse diffusion from noise toward one target pattern.
 
+## Results
+
+![Diffusion demo result](assets/results.gif)
+
 ## Quickstart
 
 ```bash
@@ -19,6 +23,29 @@ uv run diffusion-demo --target box --sampler ddim --sample-steps 80 --eta 0
 ```
 
 `--device auto` uses Apple MPS when available, otherwise CPU. DDPM sampling is the default and uses `--diffusion-steps` frames unless `--sample-steps` is set. DDIM is available as a faster optional sampler.
+
+## Learn By Tweaking
+
+The result window is an interactive lesson:
+
+- **Pause / Play** stops and resumes denoising.
+- **Prev / Next** moves one recorded step at a time.
+- **Denoising step** scrubs anywhere through the trajectory.
+- **Restart** returns to the initial noise so you can watch a feature form again.
+
+The sentence above the controls explains what to look for in the early, middle, and late phases. Compare the current grid with the predicted clean grid: `x_t` can remain noisy while the model's estimate of `x_0` already has recognizable structure.
+
+Try these small experiments after training one checkpoint:
+
+| Question | Command change | What to watch |
+|---|---|---|
+| Does conditioning matter? | Compare `--guidance-scale 0`, `1`, and `4` | Class resemblance versus artifacts |
+| Can sampling be faster? | Use `--sampler ddim --sample-steps 20`, then `80` | Speed versus refinement |
+| What does randomness change? | Change `--seed` | Different samples for the same class |
+| What does DDIM noise do? | Compare `--eta 0` and `--eta 1` | Deterministic versus stochastic paths |
+| Does the schedule matter? | Train with `--schedule linear`, then `cosine` | Loss and denoising trajectory |
+
+Keep the checkpoint fixed when comparing inference flags. Retrain only when comparing training flags such as `--schedule`, `--cond-drop`, or `--ema-decay`; otherwise two variables change at once.
 
 ## Separate Training And Inference
 
