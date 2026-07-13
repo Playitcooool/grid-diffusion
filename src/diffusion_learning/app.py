@@ -5,6 +5,7 @@ import sys
 
 import matplotlib.pyplot as plt
 from matplotlib.animation import FuncAnimation
+from matplotlib.widgets import Button, Slider
 import numpy as np
 import torch
 
@@ -64,6 +65,16 @@ def density_surface(points: np.ndarray, size: int = 35) -> tuple[np.ndarray, np.
     return xx, yy, zz
 
 
+def step_explanation(frame: int, total: int) -> str:
+    """Describe what the learner should notice at this point in sampling."""
+    progress = frame / max(total - 1, 1)
+    if progress < 0.34:
+        return "Early: x_t is mostly noise; the clean estimate is still uncertain."
+    if progress < 0.67:
+        return "Middle: large-scale structure appears as the model removes noise."
+    return "Late: small corrections sharpen the sample toward the chosen class."
+
+
 def animate(target: str, losses: list[float], xs: torch.Tensor, pred_x0s: torch.Tensor) -> None:
     target_grid = pattern_array(target)
     traj = xs[:, 0, 0].numpy()
@@ -83,6 +94,7 @@ def animate(target: str, losses: list[float], xs: torch.Tensor, pred_x0s: torch.
     dense_path_z = np.interp(dense_frames, np.arange(len(traj_xy)), np.full(len(traj_xy), 1.08))
 
     fig, ax = plt.subplots(2, 3, figsize=(11, 7))
+    fig.subplots_adjust(bottom=0.16)
     ax[1, 1].remove()
     ax_path = fig.add_subplot(2, 3, 5, projection="3d")
     fig.canvas.manager.set_window_title("Grid Diffusion Learning")
@@ -132,6 +144,8 @@ def animate(target: str, losses: list[float], xs: torch.Tensor, pred_x0s: torch.
     ax[1, 2].set_title("Distance to target")
     ax[1, 2].set_xlabel("inference step")
 
+    lesson = fig.text(0.5, 0.105, step_explanation(0, len(traj)), ha="center", fontsize=9)
+
     def update(i: int):
         images[1].set_data(traj[i])
         images[2].set_data(preds[i])
@@ -139,6 +153,7 @@ def animate(target: str, losses: list[float], xs: torch.Tensor, pred_x0s: torch.
         path_line.set_data_3d(dense_traj_xy[:upto, 0], dense_traj_xy[:upto, 1], dense_path_z[:upto])
         path_dot.set_data_3d([traj_xy[i, 0]], [traj_xy[i, 1]], [1.08])
         dist_line.set_data(np.arange(i + 1), distances[: i + 1])
+        lesson.set_text(step_explanation(i, len(traj)))
         return [images[1], images[2], path_line, path_dot, dist_line]
 
     if "agg" in plt.get_backend().lower():
@@ -148,8 +163,43 @@ def animate(target: str, losses: list[float], xs: torch.Tensor, pred_x0s: torch.
         plt.close(fig)
         return
 
-    fig._diffusion_anim = FuncAnimation(fig, update, frames=len(traj), interval=60, blit=False, repeat=False)
-    fig.tight_layout()
+    slider_ax = fig.add_axes((0.22, 0.045, 0.48, 0.025))
+    frame_slider = Slider(slider_ax, "Denoising step", 0, len(traj) - 1, valinit=0, valstep=1)
+    previous = Button(fig.add_axes((0.04, 0.035, 0.07, 0.045)), "Prev")
+    play = Button(fig.add_axes((0.12, 0.035, 0.07, 0.045)), "Pause")
+    following = Button(fig.add_axes((0.73, 0.035, 0.07, 0.045)), "Next")
+    restart = Button(fig.add_axes((0.81, 0.035, 0.09, 0.045)), "Restart")
+
+    def show_frame(value: float) -> None:
+        update(int(value))
+        fig.canvas.draw_idle()
+
+    def move(delta: int) -> None:
+        frame_slider.set_val(np.clip(int(frame_slider.val) + delta, 0, len(traj) - 1))
+
+    def toggle(_event: object) -> None:
+        if play.label.get_text() == "Pause":
+            animation.pause()
+            play.label.set_text("Play")
+        else:
+            animation.resume()
+            play.label.set_text("Pause")
+        fig.canvas.draw_idle()
+
+    def animate_frame(i: int):
+        frame_slider.eventson = False
+        frame_slider.set_val(i)
+        frame_slider.eventson = True
+        return update(i)
+
+    frame_slider.on_changed(show_frame)
+    previous.on_clicked(lambda _event: move(-1))
+    following.on_clicked(lambda _event: move(1))
+    restart.on_clicked(lambda _event: frame_slider.set_val(0))
+    play.on_clicked(toggle)
+    animation = FuncAnimation(fig, animate_frame, frames=len(traj), interval=60, blit=False, repeat=False)
+    # Keep interactive objects alive for the lifetime of the Matplotlib window.
+    fig._diffusion_controls = (animation, frame_slider, previous, play, following, restart)
     plt.show()
 
 

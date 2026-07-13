@@ -3,10 +3,16 @@ import unittest
 import torch
 
 from diffusion_learning.diffusion import Schedule, TinyUNet, q_sample, sample, seed_everything, train
+from diffusion_learning.app import step_explanation
 from diffusion_learning.patterns import GRID_SIZE, PATTERN_NAMES, all_patterns
 
 
 class DiffusionTests(unittest.TestCase):
+    def test_step_explanations_cover_sampling_phases(self):
+        explanations = [step_explanation(i, 10) for i in (0, 4, 9)]
+        self.assertEqual(len(set(explanations)), 3)
+        self.assertTrue(all(explanations))
+
     def test_patterns_shape_and_seed(self):
         seed_everything(7)
         a = torch.randn(3)
